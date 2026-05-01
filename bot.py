@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-YouTube Telegram Bot - Automatically processes YouTube URLs sent in messages.
+YouTube Telegram Bot - Webhook mode, processes messages with YouTube URLs.
 
-Designed for Railway deployment.
+Supports cookies via YT_COOKIES_B64.
 """
 
 from __future__ import annotations
@@ -18,6 +18,8 @@ from pathlib import Path
 from urllib.parse import urlparse, parse_qs, parse_qsl, urlencode, urlunparse
 
 from dotenv import load_dotenv
+from starlette.requests import Request
+
 from telegram import Update
 from telegram.constants import ChatAction
 from telegram.ext import (
@@ -26,18 +28,6 @@ from telegram.ext import (
     MessageHandler,
     filters,
     ContextTypes,
-)
-
-# ---------------- APP STATE ---------------- #
-
-app_web = None
-application = None
-
-# ---------------- REGEX ---------------- #
-
-YOUTUBE_URL_RE = re.compile(
-    r"(https?://(?:www\.|m\.|music\.)?(?:youtube\.com|youtu\.be|youtube-nocookie\.com)/[^\s<>\"']+)",
-    re.IGNORECASE,
 )
 
 # ---------------- ENV & CONFIG ---------------- #
@@ -60,6 +50,13 @@ def write_cookies_file() -> str | None:
         return str(path)
     except Exception:
         return None
+
+# ---------------- REGEX ---------------- #
+
+YOUTUBE_URL_RE = re.compile(
+    r"(https?://(?:www\.|m\.|music\.)?(?:youtube\.com|youtu\.be|youtube-nocookie\.com)/[^\s<>\"']+)",
+    re.IGNORECASE,
+)
 
 # ---------------- URL & Timestamp Parsing ---------------- #
 
@@ -300,7 +297,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await start(update, context)
 
 # Placeholder for /settings, /duration, /quality, /accurate commands...
-# You can implement these as needed, similar to your previous code.
+# You can implement these as needed, similar to previous code.
 
 # ---------------- Main message handler ---------------- #
 
@@ -314,7 +311,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not url:
         return  # Not a YouTube URL, ignore
 
-    # Fetch settings from environment
+    # Fetch settings
     default_duration = int(os.getenv("DEFAULT_DURATION", "30"))
     max_duration = int(os.getenv("MAX_DURATION", "120"))
     allow_full_video = os.getenv("ALLOW_FULL_VIDEO_DOWNLOADS", "true").lower() == "true"
@@ -391,18 +388,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await asyncio.sleep(0)  # allow cancellation
         except:
             pass
-        # Cancel typing task if still running
-        if not typing_task.done():
-            typing_task.cancel()
+        if not hasattr(asyncio, "current_task") or asyncio.current_task().done():
+            pass
+        else:
+            asyncio.current_task().cancel()
 
-# ---------------- Main setup ---------------- #
+# ---------------- Webhook setup ---------------- #
+
+from starlette.responses import JSONResponse
+
+async def webhook(request: Request):
+    data = await request.json()
+    update = Update.de_json(data, application.bot)
+    await application.process_update(update)
+    return JSONResponse({"ok": True})
 
 def main():
     load_env()
 
     token = get_env("YT_BOT_TOKEN")
-    if not token:
-        raise SystemExit("YT_BOT_TOKEN is missing. Set it in your environment variables.")
+    webhook_url = get_env("WEBHOOK_URL")
+    if not token or not webhook_url:
+        raise SystemExit("Missing YT_BOT_TOKEN or WEBHOOK_URL environment variables.")
 
     # Compatibility fix
     try:
@@ -420,8 +427,29 @@ def main():
     # You can add commands for settings, duration, quality, etc., if needed.
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    print("Bot is running. Press Ctrl+C to stop.")
-    application.run_polling()
+    # Set webhook
+    import uvicorn
+    import nest_asyncio
+    nest_asyncio.apply()
+
+    # Run the webhook server
+    import threading
+
+    # Run the Uvicorn server with the webhook route
+    import uvicorn
+    from starlette.routing import Route
+
+    app_web = application.bot  # placeholder, if needed
+
+    # Define a minimal route app
+    from starlette.applications import Starlette
+    from starlette.responses import JSONResponse
+
+    starlette_app = Starlette(routes=[Route("/webhook", webhook, methods=["POST"])])
+
+    port = int(os.getenv("PORT", "8000"))
+    print(f"Starting webhook server on port {port}")
+    uvicorn.run(starlette_app, host="0.0.0.0", port=port)
 
 if __name__ == "__main__":
     main()
