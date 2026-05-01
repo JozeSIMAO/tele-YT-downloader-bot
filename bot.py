@@ -403,6 +403,16 @@ async def webhook(request: Request):
     await application.process_update(update)
     return JSONResponse({"ok": True})
 
+import asyncio
+
+async def setup_webhook():
+    webhook_url = get_env("WEBHOOK_URL")
+    if not webhook_url:
+        print("WEBHOOK_URL not set.")
+        return
+    await application.bot.set_webhook(webhook_url)
+    print(f"Webhook set to {webhook_url}")
+
 def main():
     load_env()
 
@@ -421,16 +431,6 @@ def main():
     global application
     application = Application.builder().token(token).build()
     
-    import asyncio
-
-    async def setup_webhook():
-        webhook_url = get_env("WEBHOOK_URL")
-        if not webhook_url:
-            print("WEBHOOK_URL not set.")
-            return
-        await application.bot.set_webhook(webhook_url)
-        print(f"Webhook set to {webhook_url}")
-
     # Register handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
