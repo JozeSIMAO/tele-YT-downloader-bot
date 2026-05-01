@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-YouTube Telegram Bot - Download videos or clips via /download command
+YouTube Telegram Bot - Automatically processes YouTube URLs sent in messages.
 
 Designed for Railway deployment.
 """
@@ -13,6 +13,7 @@ import re
 import shutil
 import tempfile
 import uuid
+import base64
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs, parse_qsl, urlencode, urlunparse
 
@@ -22,9 +23,9 @@ from telegram.constants import ChatAction
 from telegram.ext import (
     Application,
     CommandHandler,
-    ContextTypes,
     MessageHandler,
     filters,
+    ContextTypes,
 )
 
 # ---------------- APP STATE ---------------- #
@@ -252,6 +253,23 @@ async def run_ytdlp_download(
         raise RuntimeError("Download completed but no video file found.")
     return video_file
 
+# ---------------- Quality Selector ---------------- #
+
+def quality_selector(label: str) -> str:
+    label = label.strip().lower().replace("p", "")
+    if label == "360":
+        return "b[height<=360]/best[height<=360]/best"
+    elif label == "480":
+        return "b[height<=480]/best[height<=480]/best"
+    elif label == "720":
+        return "b[height<=720]/best[height<=720]/best"
+    elif label == "1080":
+        return "b[height<=1080]/best[height<=1080]/best"
+    elif label in {"best", "max"}:
+        return "best"
+    else:
+        raise ValueError("Unsupported quality")
+
 # ---------------- Telegram Handlers ---------------- #
 
 async def send_typing_loop(update: Update, stop_event: asyncio.Event):
@@ -267,8 +285,9 @@ async def send_typing_loop(update: Update, stop_event: asyncio.Event):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
         "Hi! Send me a YouTube link and I’ll download it.\n\n"
+        "It will automatically detect timestamp parameters if present.\n"
+        "Just send the link, and I will process it.\n\n"
         "Commands:\n"
-        "/download <URL> [start] [end] - download full video or clip\n"
         "/help - show help\n"
         "/settings - show current settings\n"
         "/duration <seconds> - set default clip duration\n"
@@ -280,30 +299,30 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await start(update, context)
 
-# Placeholder for settings, duration, quality, accurate commands...
-# You can copy your existing implementations here.
+# Placeholder for /settings, /duration, /quality, /accurate commands...
+# You can implement these as needed, similar to your previous code.
 
-# ---------------- /download Command ---------------- #
+# ---------------- Main message handler ---------------- #
 
-async def download_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_text("Usage: /download <YouTube URL> [start_time] [end_time]\nExample: /download https://youtu.be/ID 1:30 2:00")
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.text:
         return
 
-    url_input = context.args[0]
-    start_time_input = context.args[1] if len(context.args) >= 2 else None
-    end_time_input = context.args[2] if len(context.args) >= 3 else None
+    text = update.message.text.strip()
+    url = extract_url(text)
 
-    # Build URL with timestamp if provided (the existing functions handle timestamped URLs)
-    url = url_input
-    # You could append timestamp params here if needed, but your existing functions handle URL parsing.
+    if not url:
+        return  # Not a YouTube URL, ignore
 
-    # Fetch settings from env or defaults
+    # Fetch settings from environment
     default_duration = int(os.getenv("DEFAULT_DURATION", "30"))
     max_duration = int(os.getenv("MAX_DURATION", "120"))
-    allow_full_video = True  # or read from env if needed
+    allow_full_video = os.getenv("ALLOW_FULL_VIDEO_DOWNLOADS", "true").lower() == "true"
     quality_label = os.getenv("DEFAULT_QUALITY_LABEL", "480")
-    quality = quality_selector(quality_label)
+    try:
+        quality = quality_selector(quality_label)
+    except Exception:
+        quality = "best"
     accurate = os.getenv("ACCURATE_MODE", "false").lower() == "true"
     force_mp4 = os.getenv("FORCE_MP4", "true").lower() == "true"
     fragments = int(os.getenv("CONCURRENT_FRAGMENTS", "8"))
@@ -365,15 +384,20 @@ async def download_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
 
     except Exception as e:
-        await update.message.reply_text(f"Error during download: {e}")
+        await update.message.reply_text(f"Error: {e}")
     finally:
         stop_event.set()
-        typing_task.cancel()
+        try:
+            await asyncio.sleep(0)  # allow cancellation
+        except:
+            pass
+        # Cancel typing task if still running
+        if not typing_task.done():
+            typing_task.cancel()
 
 # ---------------- Main setup ---------------- #
 
 def main():
-    global application
     load_env()
 
     token = get_env("YT_BOT_TOKEN")
@@ -387,17 +411,14 @@ def main():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
+    global application
     application = Application.builder().token(token).build()
 
     # Register handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("settings", lambda u, c: None))  # implement as needed
-    application.add_handler(CommandHandler("duration", lambda u, c: None))
-    application.add_handler(CommandHandler("quality", lambda u, c: None))
-    application.add_handler(CommandHandler("accurate", lambda u, c: None))
-    application.add_handler(CommandHandler("download", download_command))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, lambda u, c: None))  # implement as needed
+    # You can add commands for settings, duration, quality, etc., if needed.
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     print("Bot is running. Press Ctrl+C to stop.")
     application.run_polling()
