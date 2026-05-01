@@ -648,7 +648,7 @@ def main() -> None:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
-    token = os.getenv("BOT_TOKEN")
+    token = os.getenv("YT_BOT_TOKEN")
     application = Application.builder().token(token).build()
 
     application.add_handler(CommandHandler("start", start))
