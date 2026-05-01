@@ -616,12 +616,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 def validate_environment() -> None:
     load_dotenv()
 
-    token = os.getenv("BOT_TOKEN")
+    token = os.getenv("YT_BOT_TOKEN")
     if not token or token == "PASTE_YOUR_BOT_TOKEN_HERE":
         raise SystemExit(
-            "BOT_TOKEN is missing.\n"
+            "YT_BOT_TOKEN is missing.\n"
             "Create a .env file and add:\n"
-            "BOT_TOKEN=your_telegram_bot_token"
+            "YT_BOT_TOKEN=your_telegram_bot_token"
         )
 
     missing = []
