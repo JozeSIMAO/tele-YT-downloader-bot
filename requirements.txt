@@ -3,3 +3,4 @@ python-dotenv
 yt-dlp
 fastapi
 uvicorn
+nest_asyncio
