@@ -284,6 +284,7 @@ async def run_ytdlp_download(
 
         cmd = [
             "yt-dlp",
+            "--cookies", "cookies.txt",
             "--download-sections",
             section,
             "--no-playlist",
@@ -305,6 +306,7 @@ async def run_ytdlp_download(
 
         cmd = [
             "yt-dlp",
+	    "--cookies", "cookies.txt",
             "--no-playlist",
             "--restrict-filenames",
             "--concurrent-fragments",
